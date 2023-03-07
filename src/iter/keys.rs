@@ -1,14 +1,14 @@
 use std::{
     fmt::{Debug, Display},
-    ptr::null_mut,
 };
 
 use utfx::{U16CString, U16String};
-use winapi::shared::winerror::ERROR_NO_MORE_ITEMS;
-use winapi::um::winreg::{RegEnumKeyExW, RegQueryInfoKeyW};
+use windows::core::PWSTR;
+use windows::Win32::Foundation::{ERROR_NO_MORE_ITEMS, NO_ERROR};
+use windows::Win32::System::Registry::{REG_SAM_FLAGS, RegEnumKeyExW, RegQueryInfoKeyW};
+
 
 use crate::key::RegKey;
-use crate::sec::Security;
 
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -51,7 +51,7 @@ impl<'a> Debug for KeyRef<'a> {
 
 impl<'a> KeyRef<'a> {
     #[inline]
-    pub fn open(&self, sec: Security) -> Result<RegKey, crate::key::Error> {
+    pub fn open(&self, sec: REG_SAM_FLAGS) -> Result<RegKey, crate::key::Error> {
         let path = self.regkey.path.to_ustring();
         let suffix = self.name.to_ustring();
         let bs = U16String::from_str("\\");
@@ -79,27 +79,28 @@ impl<'a> Iterator for Keys<'a> {
         // Reset first byte, just in case.
         self.buf[0] = 0;
         let mut len = self.buf.len() as u32;
+        let name = PWSTR::from_raw(self.buf.as_mut_ptr());
 
         let result = unsafe {
             RegEnumKeyExW(
                 self.regkey.handle,
                 self.index,
-                self.buf.as_mut_ptr(),
+                name,
                 &mut len,
-                null_mut(),
-                null_mut(),
-                null_mut(),
-                null_mut(),
+                None,
+                PWSTR::null(),
+                None,
+                None,
             )
         };
 
-        if result == ERROR_NO_MORE_ITEMS as i32 {
+        if result == ERROR_NO_MORE_ITEMS {
             return None;
         }
 
         self.index += 1;
 
-        if result != 0 {
+        if result != NO_ERROR {
             // TODO: don't panic
             panic!();
         }
@@ -124,21 +125,21 @@ impl<'a> Keys<'a> {
         let result = unsafe {
             RegQueryInfoKeyW(
                 regkey.handle,
-                null_mut(),
-                null_mut(),
-                null_mut(),
-                null_mut(), // &mut subkeys_len,
-                &mut subkeys_max_str_len,
-                null_mut(),
-                null_mut(),
-                null_mut(),
-                null_mut(),
-                null_mut(),
-                null_mut(),
+                PWSTR::null(),
+                None,
+                None,
+                None, // &mut subkeys_len,
+                Some(&mut subkeys_max_str_len),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
             )
         };
 
-        if result == 0 {
+        if result == NO_ERROR {
             return Ok(Keys {
                 regkey,
                 buf: vec![0u16; subkeys_max_str_len as usize + 1],
@@ -146,6 +147,6 @@ impl<'a> Keys<'a> {
             });
         }
 
-        Err(std::io::Error::from_raw_os_error(result))
+        Err(std::io::Error::from_raw_os_error(result.0 as i32))
     }
 }

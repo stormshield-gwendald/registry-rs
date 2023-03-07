@@ -11,8 +11,9 @@
 //! the conversion of `String` and `str` into a UTF-16 string suitable for FFI usage.
 //!
 //! ```no_run
-//! # use registry::{Hive, Security};
-//! let regkey = Hive::CurrentUser.open(r"some\nested\path", Security::Read)?;
+//! # use windows::Win32::System::Registry::KEY_READ;
+//! use registry::{Hive};
+//! let regkey = Hive::CurrentUser.open(r"some\nested\path", KEY_READ)?;
 //! # Ok::<(), registry::Error>(())
 //! ```
 //!
@@ -20,8 +21,9 @@
 //! and accessing key value data.
 //!
 //! ```no_run
-//! # use registry::{Data, Hive, Security};
-//! # let regkey = Hive::CurrentUser.open(r"some\nested\path", Security::Read)?;
+//! # use windows::Win32::System::Registry::KEY_READ;
+//! use registry::{Data, Hive};
+//! # let regkey = Hive::CurrentUser.open(r"some\nested\path", KEY_READ)?;
 //! regkey.set_value("SomeValue", &Data::U32(42))?;
 //! assert!(matches!(regkey.value("SomeValue")?, Data::U32(42)));
 //! # Ok::<(), registry::Error>(())
@@ -33,13 +35,11 @@
 mod hive;
 pub mod iter;
 pub mod key;
-mod sec;
 pub mod value;
 
 pub use hive::Hive;
 #[doc(inline)]
 pub use key::RegKey;
-pub use sec::Security;
 #[doc(inline)]
 pub use value::Data;
 
@@ -62,11 +62,12 @@ pub enum Error {
 mod tests {
     use super::*;
     use std::convert::TryInto;
+    use windows::Win32::System::Registry::{KEY_ALL_ACCESS, KEY_READ};
 
     #[test]
     fn open_key() {
         let result = Hive::CurrentUser
-            .open(r"SOFTWARE\Microsoft", Security::AllAccess)
+            .open(r"SOFTWARE\Microsoft", KEY_ALL_ACCESS)
             .unwrap();
         println!("{}", result);
     }
@@ -74,7 +75,7 @@ mod tests {
     #[test]
     fn iter_keys() {
         let regkey = Hive::CurrentUser
-            .open(r"SOFTWARE\Microsoft", Security::AllAccess)
+            .open(r"SOFTWARE\Microsoft", KEY_ALL_ACCESS)
             .unwrap();
         let results = regkey.keys().collect::<Result<Vec<_>, _>>().unwrap();
         println!("{:?}", &results);
@@ -83,7 +84,7 @@ mod tests {
     #[test]
     fn iter_values() {
         let regkey = Hive::CurrentUser
-            .open(r"Keyboard Layout\Preload", Security::Read)
+            .open(r"Keyboard Layout\Preload", KEY_READ)
             .unwrap();
         let results = regkey.values().collect::<Result<Vec<_>, _>>().unwrap();
         println!("{:?}", &results);
@@ -93,7 +94,7 @@ mod tests {
     fn display_repr() {
         const KEY_UNINSTALL: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
         let regkey = Hive::LocalMachine
-            .open(KEY_UNINSTALL, Security::Read)
+            .open(KEY_UNINSTALL, KEY_READ)
             .unwrap();
 
         assert_eq!(
@@ -105,7 +106,7 @@ mod tests {
     #[test]
     fn set_value_and_delete() {
         let regkey = Hive::CurrentUser
-            .create(r"Test\registry-rust-crate", Security::AllAccess)
+            .create(r"Test\registry-rust-crate", KEY_ALL_ACCESS)
             .unwrap();
         regkey
             .set_value("test", &Data::String("Meow meow".try_into().unwrap()))
@@ -136,13 +137,13 @@ mod tests {
             format!("{}", regkey),
             r"HKEY_CURRENT_USER\Test\registry-rust-crate"
         );
-        let subkey = regkey.create("subkey", Security::AllAccess).unwrap();
+        let subkey = regkey.create("subkey", KEY_ALL_ACCESS).unwrap();
         assert_eq!(
             format!("{}", subkey),
             r"HKEY_CURRENT_USER\Test\registry-rust-crate\subkey"
         );
 
-        let subkey = regkey.open("subkey", Security::AllAccess).unwrap();
+        let subkey = regkey.open("subkey", KEY_ALL_ACCESS).unwrap();
         assert_eq!(
             format!("{}", subkey),
             r"HKEY_CURRENT_USER\Test\registry-rust-crate\subkey"

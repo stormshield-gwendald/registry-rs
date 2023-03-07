@@ -2,18 +2,14 @@ use std::{
     convert::{Infallible, TryInto},
     fmt::Display,
     io,
-    ptr::null_mut,
 };
 
 use utfx::{U16CStr, U16CString};
-use winapi::shared::minwindef::HKEY;
-use winapi::um::winreg::{
-    RegCloseKey, RegCreateKeyExW, RegDeleteKeyW, RegDeleteTreeW, RegOpenCurrentUser, RegOpenKeyExW,
-    RegSaveKeyExW,
-};
+use windows::core::HSTRING;
+use windows::Win32::Foundation::NO_ERROR;
+use windows::Win32::System::Registry::{HKEY, REG_NO_COMPRESSION, REG_OPTION_NON_VOLATILE, REG_SAM_FLAGS, RegCloseKey, RegCreateKeyExW, RegDeleteKeyW, RegDeleteTreeW, RegOpenCurrentUser, RegOpenKeyExW, RegSaveKeyExW};
 
 use crate::iter;
-use crate::sec::Security;
 use crate::{value, Hive};
 
 #[derive(Debug, thiserror::Error)]
@@ -30,6 +26,9 @@ pub enum Error {
 
     #[error("An unknown IO error occurred for given path: {0:?}")]
     Unknown(String, #[source] io::Error),
+
+    #[error("Windows error : {0}")]
+    WindowsError(#[from] windows::core::Error),
 }
 
 impl Error {
@@ -89,7 +88,7 @@ impl Drop for RegKey {
 
 impl RegKey {
     #[inline]
-    pub fn open<P>(&self, path: P, sec: Security) -> Result<RegKey, Error>
+    pub fn open<P>(&self, path: P, sec: REG_SAM_FLAGS) -> Result<RegKey, Error>
     where
         P: TryInto<U16CString>,
         P::Error: Into<Error>,
@@ -120,7 +119,7 @@ impl RegKey {
     }
 
     #[inline]
-    pub fn create<P>(&self, path: P, sec: Security) -> Result<RegKey, Error>
+    pub fn create<P>(&self, path: P, sec: REG_SAM_FLAGS) -> Result<RegKey, Error>
     where
         P: TryInto<U16CString>,
         P::Error: Into<Error>,
@@ -198,12 +197,12 @@ impl RegKey {
         }
     }
 
-    pub fn open_current_user(sec: Security) -> Result<RegKey, Error> {
-        let mut hkey = null_mut();
+    pub fn open_current_user(sec: REG_SAM_FLAGS) -> Result<RegKey, Error> {
+        let mut hkey = HKEY::default();
 
-        let result = unsafe { RegOpenCurrentUser(sec.bits(), &mut hkey) };
+        let result = unsafe { RegOpenCurrentUser(sec.0, &mut hkey) };
 
-        if result == 0 {
+        if result == NO_ERROR {
             // TODO: use NT API to query path
             return Ok(RegKey {
                 hive: Hive::CurrentUser,
@@ -213,25 +212,25 @@ impl RegKey {
         }
 
         let path = "<current user>".to_string();
-        Err(Error::from_code(result, path))
+        Err(Error::from_code(result.0 as i32, path))
     }
 }
 
 #[inline]
-pub(crate) fn open_hkey<'a, P>(base: HKEY, path: P, sec: Security) -> Result<HKEY, Error>
+pub(crate) fn open_hkey<'a, P>(base: HKEY, path: P, sec: REG_SAM_FLAGS) -> Result<HKEY, Error>
 where
     P: AsRef<U16CStr>,
 {
-    let path = path.as_ref();
-    let mut hkey = std::ptr::null_mut();
-    let result = unsafe { RegOpenKeyExW(base, path.as_ptr(), 0, sec.bits(), &mut hkey) };
+    let path = HSTRING::from_wide(path.as_ref().as_slice())?;
+    let mut hkey = HKEY::default();
+    let result = unsafe { RegOpenKeyExW(base, &path, 0, sec, &mut hkey) };
 
-    if result == 0 {
+    if result == NO_ERROR {
         return Ok(hkey);
     }
 
     let path = path.to_string_lossy();
-    Err(Error::from_code(result, path))
+    Err(Error::from_code(result.0 as i32, path))
 }
 
 #[inline]
@@ -239,15 +238,15 @@ pub(crate) fn save_hkey<'a, P>(hkey: HKEY, path: P) -> Result<(), Error>
 where
     P: AsRef<U16CStr>,
 {
-    let path = path.as_ref();
-    let result = unsafe { RegSaveKeyExW(hkey, path.as_ptr(), std::ptr::null_mut(), 4) };
+    let path = HSTRING::from_wide(path.as_ref().as_slice())?;
+    let result = unsafe { RegSaveKeyExW(hkey, &path, None, REG_NO_COMPRESSION) };
 
-    if result == 0 {
+    if result == NO_ERROR {
         return Ok(());
     }
 
     let path = path.to_string_lossy();
-    Err(Error::from_code(result, path))
+    Err(Error::from_code(result.0 as i32, path))
 }
 
 #[inline]
@@ -255,59 +254,61 @@ pub(crate) fn delete_hkey<P>(base: HKEY, path: P, is_recursive: bool) -> Result<
 where
     P: AsRef<U16CStr>,
 {
-    let path = path.as_ref();
+    let path = HSTRING::from_wide(path.as_ref().as_slice())?;
 
     let result = if is_recursive {
-        unsafe { RegDeleteTreeW(base, path.as_ptr()) }
+        unsafe { RegDeleteTreeW(base, &path) }
     } else {
-        unsafe { RegDeleteKeyW(base, path.as_ptr()) }
+        unsafe { RegDeleteKeyW(base, &path) }
     };
 
-    if result == 0 {
+    if result == NO_ERROR {
         return Ok(());
     }
 
     let path = path.to_string_lossy();
-    Err(Error::from_code(result, path))
+    Err(Error::from_code(result.0 as i32, path))
 }
 
 #[inline]
-pub(crate) fn create_hkey<P>(base: HKEY, path: P, sec: Security) -> Result<HKEY, Error>
+pub(crate) fn create_hkey<P>(base: HKEY, path: P, sec: REG_SAM_FLAGS) -> Result<HKEY, Error>
 where
     P: AsRef<U16CStr>,
 {
-    let path = path.as_ref();
-    let mut hkey = std::ptr::null_mut();
+    let path = HSTRING::from_wide(path.as_ref().as_slice())?;
+
+    let mut hkey = HKEY::default();
     let result = unsafe {
         RegCreateKeyExW(
             base,
-            path.as_ptr(),
+            &path,
             0,
-            std::ptr::null_mut(),
-            0,
-            sec.bits(),
-            std::ptr::null_mut(),
+            None,
+            REG_OPTION_NON_VOLATILE,
+            sec,
+            None,
             &mut hkey,
-            std::ptr::null_mut(),
+            None,
         )
     };
 
-    if result == 0 {
+    if result == NO_ERROR {
         return Ok(hkey);
     }
 
     let path = path.to_string_lossy();
-    Err(Error::from_code(result, path))
+    Err(Error::from_code(result.0 as i32, path))
 }
 
 #[cfg(test)]
 mod tests {
+    use windows::Win32::System::Registry::KEY_READ;
     use crate::Hive;
 
     #[test]
     fn test_paths() {
         let key = Hive::CurrentUser
-            .open("SOFTWARE\\Microsoft", crate::Security::Read)
+            .open("SOFTWARE\\Microsoft", KEY_READ)
             .unwrap();
         assert_eq!(key.to_string(), "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft")
     }
@@ -317,7 +318,7 @@ mod tests {
         let key_err = Hive::CurrentUser
             .open(
                 r"2f773499-0946-4f83-9cad-4c8ebbaf9f73\050b26e8-ccac-4d2a-8d94-c597fc7ebf07",
-                crate::Security::Read,
+                KEY_READ,
             )
             .unwrap_err();
 
@@ -327,7 +328,7 @@ mod tests {
     #[test]
     fn non_existent_value() {
         let key = Hive::CurrentUser
-            .open("SOFTWARE\\Microsoft", crate::Security::Read)
+            .open("SOFTWARE\\Microsoft", KEY_READ)
             .unwrap();
         let value_err = key
             .value("4e996ef6-a4ef-4026-b9fc-464d352d35ee")

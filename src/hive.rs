@@ -1,14 +1,12 @@
 use std::{convert::TryInto, fmt::Display};
 
 use utfx::{U16CStr, U16CString};
-use winapi::um::winreg::{
-    HKEY_CLASSES_ROOT, HKEY_CURRENT_CONFIG, HKEY_CURRENT_USER, HKEY_CURRENT_USER_LOCAL_SETTINGS,
-    HKEY_LOCAL_MACHINE, HKEY_PERFORMANCE_DATA, HKEY_USERS,
-};
-use winapi::{shared::minwindef::HKEY, um::winreg::RegLoadAppKeyW};
+use windows::core::HSTRING;
+use windows::Win32::Foundation::NO_ERROR;
+use windows::Win32::System::Registry::{HKEY, HKEY_CLASSES_ROOT, HKEY_CURRENT_CONFIG, HKEY_CURRENT_USER, HKEY_CURRENT_USER_LOCAL_SETTINGS, HKEY_LOCAL_MACHINE, HKEY_PERFORMANCE_DATA, HKEY_USERS, REG_SAM_FLAGS, RegLoadAppKeyW};
 
 use crate::key::{self, Error};
-use crate::{sec::Security, RegKey};
+use crate::RegKey;
 
 /// All hives of the Windows Registry. Start here to get to a registry key.
 #[derive(Debug, Copy, Clone)]
@@ -42,7 +40,7 @@ impl Hive {
     }
 
     #[inline]
-    pub fn open<P>(&self, path: P, sec: Security) -> Result<RegKey, Error>
+    pub fn open<P>(&self, path: P, sec: REG_SAM_FLAGS) -> Result<RegKey, Error>
     where
         P: TryInto<U16CString>,
         P::Error: Into<Error>,
@@ -66,7 +64,7 @@ impl Hive {
     }
 
     #[inline]
-    pub fn create<P>(&self, path: P, sec: Security) -> Result<RegKey, Error>
+    pub fn create<P>(&self, path: P, sec: REG_SAM_FLAGS) -> Result<RegKey, Error>
     where
         P: TryInto<U16CString>,
         P::Error: Into<Error>,
@@ -92,7 +90,7 @@ impl Hive {
     #[inline]
     pub fn load_file<P: AsRef<std::path::Path>>(
         file_path: P,
-        sec: Security,
+        sec: REG_SAM_FLAGS,
     ) -> Result<RegKey, std::io::Error> {
         if !file_path.as_ref().exists() {
             return Err(std::io::Error::new(
@@ -126,17 +124,22 @@ impl Display for Hive {
 }
 
 #[inline]
-pub(crate) fn load_appkey<P>(path: P, sec: Security) -> Result<HKEY, std::io::Error>
+pub(crate) fn load_appkey<P>(path: P, sec: REG_SAM_FLAGS) -> Result<HKEY, std::io::Error>
 where
     P: AsRef<U16CStr>,
 {
-    let path = path.as_ref();
-    let mut hkey = std::ptr::null_mut();
-    let result = unsafe { RegLoadAppKeyW(path.as_ptr(), &mut hkey, sec.bits(), 0, 0) };
+    let path = match HSTRING::from_wide(path.as_ref().as_slice()) {
+        Ok(key) => key,
+        Err(error) => {
+            return Err(std::io::Error::from_raw_os_error(error.code().0 as i32))
+        }
+    };
+    let mut hkey = HKEY::default();
+    let result = unsafe { RegLoadAppKeyW(&path, &mut hkey, sec.0, 0, 0) };
 
-    if result == 0 {
+    if result == NO_ERROR {
         return Ok(hkey);
     }
 
-    Err(std::io::Error::from_raw_os_error(result))
+    Err(std::io::Error::from_raw_os_error(result.0 as i32))
 }
