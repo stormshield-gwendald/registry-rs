@@ -1,9 +1,8 @@
 use registry::Hive;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HANDLE, LUID};
-use windows::Win32::Security::{AdjustTokenPrivileges, LookupPrivilegeValueW, LUID_AND_ATTRIBUTES, SE_PRIVILEGE_ENABLED, TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES};
+use windows::Win32::Security::{AdjustTokenPrivileges, LookupPrivilegeValueW, LUID_AND_ATTRIBUTES, SE_PRIVILEGE_ENABLED, TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES, SE_BACKUP_NAME, SE_RESTORE_NAME};
 use windows::Win32::System::Registry::{KEY_READ, KEY_WRITE};
-use windows::Win32::System::SystemServices::{SE_BACKUP_NAME, SE_RESTORE_NAME};
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
 
